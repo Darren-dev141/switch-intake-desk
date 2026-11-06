@@ -1,0 +1,6 @@
+agent/agent.json
+agent/state.json
+agent/pending/
+*.log
+.env
+__pycache__/
