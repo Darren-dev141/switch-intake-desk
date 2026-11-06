@@ -1,0 +1,4 @@
+aiohttp>=3.9
+# plus a Laya decision-server client on PYTHONPATH (~/workspace/laya/client.py
+# in the author's stack — any client for POST /choose on the Laya server works;
+# the agent degrades to a flagged default verdict if Laya is unreachable)
