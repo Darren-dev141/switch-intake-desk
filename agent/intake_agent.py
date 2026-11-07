@@ -191,15 +191,26 @@ async def llm_draft(title, evidence, verdict):
         "No hype, no invented facts. If the evidence is thin, say so."
     )
     timeout = aiohttp.ClientTimeout(total=90)
-    async with aiohttp.ClientSession(timeout=timeout) as s:
-        async with s.post(OMNI, json={"model": "mechanical",
-                                      "messages": [{"role": "user", "content": prompt}],
-                                      "max_tokens": 500}) as r:
-            d = await r.json()
-            return d["choices"][0]["message"]["content"].strip()
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as s:
+            async with s.post(OMNI, json={"model": "mechanical",
+                                          "messages": [{"role": "user", "content": prompt}],
+                                          "max_tokens": 500}) as r:
+                d = await r.json()
+                return d["choices"][0]["message"]["content"].strip(), False
+    except Exception as e:  # no drafting endpoint (e.g. a fresh clone) -> degrade honestly
+        log(f"draft model failed: {e}")
+        stub = (f"WHAT IT IS — {title}. The drafting model was unreachable, so no "
+                f"summary was generated; raw evidence excerpt: {evidence[:400]}\n"
+                f"WHY THIS VERDICT — {verdict} (decided before drafting; see the "
+                f"confidence/fallback flags below).\n"
+                f"WATCH-OUT — DRAFT FALLBACK: judge the raw evidence yourself.")
+        return stub, True
 
 
 def next_intake_number():
+    if not LEDGER.exists():
+        return 1  # fresh clone: no filing has landed yet
     nums = [int(n) for n in re.findall(r"^## #(\d+)", LEDGER.read_text(errors="replace"), re.M)]
     return (max(nums) + 1) if nums else 1
 
@@ -211,7 +222,7 @@ async def handle_url(session, room_id, url, sender_name):
     fallback = verdict is None
     if fallback:
         verdict = "LOG"
-    draft = await llm_draft(title, evidence, verdict)
+    draft, draft_fallback = await llm_draft(title, evidence, verdict)
     number = next_intake_number()
     today = time.strftime("%b %-d, %Y") if os.name != "nt" else time.strftime("%b %d, %Y")
     filing = (f"\n## #{number} — {title} — via Intake Desk (Switch room), "
@@ -219,7 +230,8 @@ async def handle_url(session, room_id, url, sender_name):
               f"**Source:** {url}\n\n{draft}\n\n"
               f"Filed by the Intake Desk agent after Darren's GO in the Switch room. "
               f"Laya verdict: {verdict} (confidence {conf:.2f}"
-              f"{', LAYA FALLBACK — verdict defaulted to LOG' if fallback else ''}).\n")
+              f"{', LAYA FALLBACK — verdict defaulted to LOG' if fallback else ''}"
+              f"{', DRAFT FALLBACK — drafting model unreachable, evidence stub filed' if draft_fallback else ''}).\n")
     low_conf = (not fallback) and conf < 0.35
     (PENDING_DIR / f"{room_id}.md").write_text(filing)
     STATE["pending"][room_id] = {"number": number, "url": url, "verdict": verdict,
@@ -229,7 +241,8 @@ async def handle_url(session, room_id, url, sender_name):
                        f"**Intake draft #{number} — {title}**\n\n{draft}\n\n"
                        f"**Verdict: {verdict}** (Laya confidence {conf:.2f}"
                        f"{' — Laya unreachable, defaulted' if fallback else ''}"
-                       f"{' — LOW CONFIDENCE: provisional, your call carries it' if low_conf else ''}).\n"
+                       f"{' — LOW CONFIDENCE: provisional, your call carries it' if low_conf else ''}"
+                       f"{' — drafting model unreachable, evidence stub shown' if draft_fallback else ''}).\n"
                        f"{sender_name}, reply **GO** to file it in the ledger, or **NO** to discard.")
 
 
