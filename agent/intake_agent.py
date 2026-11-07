@@ -22,23 +22,60 @@ from pathlib import Path
 
 import aiohttp
 
-sys.path.insert(0, os.path.expanduser("~/workspace/laya"))
-import client as laya  # noqa: E402  (Darren's Laya decision server client)
+try:
+    sys.path.insert(0, os.path.expanduser("~/workspace/laya"))
+    import client as laya  # noqa: E402  (Darren's Laya decision server client)
+except Exception:  # Laya client not present (e.g. a fresh clone)
+    class _LayaUnavailable:
+        """Stand-in for the documented degradation: choose() raises here,
+        laya_verdict_sync catches it and falls back to a flagged default."""
+
+        def choose(self, *args, **kwargs):
+            raise RuntimeError("Laya decision client not available")
+
+        def outcome(self, *args, **kwargs):
+            return None
+
+    laya = _LayaUnavailable()
 
 HERE = Path(__file__).parent
 STATE_F = HERE / "state.json"
 PENDING_DIR = HERE / "pending"
 PENDING_DIR.mkdir(exist_ok=True)
 
-SWITCH = "http://127.0.0.1:8000"
-OMNI = "http://127.0.0.1:8799/v1/chat/completions"
-LEDGER = Path(os.path.expanduser("~/workspace/second-brain/ledger/tweets.md"))
-INDEX = Path(os.path.expanduser("~/workspace/second-brain/INDEX.md"))
-TOOLS_LOG = Path(os.path.expanduser("~/workspace/notes/x-tools-log.md"))
+SWITCH = os.environ.get("SWITCH_URL", "http://127.0.0.1:8000")
+OMNI = os.environ.get("OMNI_URL", "http://127.0.0.1:8799/v1/chat/completions")
+
+
+def _data_path(env_name, default, fallback_name):
+    """Filing targets live in Darren's ~/workspace tree on his machine. On
+    any other machine (a fresh clone), fall back to a ledger folder beside
+    the agent so a GO filing lands somewhere real instead of crashing."""
+    override = os.environ.get(env_name)
+    if override:
+        p = Path(override).expanduser()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    p = Path(os.path.expanduser(default))
+    if p.parent.exists():
+        return p
+    local = HERE / "ledger" / fallback_name
+    local.parent.mkdir(parents=True, exist_ok=True)
+    return local
+
+
+LEDGER = _data_path("INTAKE_LEDGER", "~/workspace/second-brain/ledger/tweets.md", "tweets.md")
+INDEX = _data_path("INTAKE_INDEX", "~/workspace/second-brain/INDEX.md", "INDEX.md")
+TOOLS_LOG = _data_path("INTAKE_TOOLS_LOG", "~/workspace/notes/x-tools-log.md", "x-tools-log.md")
 ROOM_NAME = "intake-desk"
 VERDICTS = ["STEAL", "ADOPT", "LOG + WATCH", "LOG", "SKIP"]
 
-AGENT = json.loads((HERE / "agent.json").read_text())
+try:
+    AGENT = json.loads((HERE / "agent.json").read_text())
+except FileNotFoundError:
+    raise SystemExit("agent.json not found — register the agent first (see "
+                     "README, 'Agent setup after the stack is up', step 3), "
+                     "or copy agent.json.example to agent.json with your values.")
 AGENT_ID = AGENT["id"]
 API_KEY = AGENT["api_key"]
 HDRS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}

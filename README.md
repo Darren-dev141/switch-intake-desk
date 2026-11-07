@@ -58,12 +58,14 @@ human's approval as a hard gate — that's the workflow Switch was built for.
 ## Layout of this repo
 
 - `agent/intake_agent.py` — the whole agent (~360 lines, Python + aiohttp).
-  Also imports the Laya client from my local stack and posts drafts through
-  Switch ops.
+  Uses the Laya client from my local stack when present and degrades to a
+  flagged default verdict without it; posts drafts through Switch ops.
 - `agent/start-agent.sh` — launcher (agent credentials live in
   `agent/agent.json`, created at registration, never committed).
 - `deploy/` — how the stack was actually run for this entry: **natively, no
-  Docker** (see below).
+  Docker** (see below). These scripts carry the build machine's own paths
+  and are kept as the run record; to run the stack yourself, use the
+  upstream compose route in "Reproduce it" below.
 
 ## Running it
 
@@ -96,6 +98,34 @@ curl -X POST $SWITCH_URL/agents -H "Authorization: Bearer $REG_KEY" \
 agent/start-agent.sh
 # 5. In Mattermost, open #intake-desk and drop a link with @intake-desk.
 ```
+
+## Reproduce it
+
+What a fresh clone needs, in order:
+
+1. **The Switch stack.** This repo is the agent, not the stack. Run the
+   stack from the upstream Switch repo's standalone Docker Compose
+   (switch-core + Mattermost + Postgres). The `deploy/` scripts in this
+   repo are the record of how the entry ran natively on the build machine;
+   they reference that machine's paths and are not a portable installer.
+2. **Python deps.** `python3 -m venv .venv && .venv/bin/pip install -r
+   agent/requirements.txt` (aiohttp is the only hard dependency).
+3. **Register the agent** (steps 1–3 under "Agent setup" above) and save
+   the returned credentials as `agent/agent.json`. Without that file the
+   agent exits immediately and tells you why.
+4. **Run it:** `agent/start-agent.sh`. Configuration is by environment:
+   `SWITCH_URL` (default `http://127.0.0.1:8000`) and `OMNI_URL` for the
+   drafting model endpoint.
+5. **Optional pieces degrade honestly.** Without Darren's Laya decision
+   server (or any Jev-compatible client for `POST /choose`), verdicts fall
+   back to a flagged default instead of crashing. Filings approved with GO
+   append to `INTAKE_LEDGER`/`INTAKE_INDEX` if set; otherwise to Darren's
+   ledger paths when that tree exists, or to `agent/ledger/` in the clone.
+
+Verified from a fresh clone (agent side, steps 2–3): the agent imports and
+starts cleanly with no Laya present, verdicts degrade to the flagged
+default, a GO filing lands in the clone's `agent/ledger/`, and a missing
+`agent.json` stops it with a clear message instead of a traceback.
 
 ## What I'd tell the next builder
 
